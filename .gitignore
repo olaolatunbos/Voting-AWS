@@ -1,0 +1,31 @@
+# Terraform working directory — provider binaries, ~650MB. Never commit.
+**/.terraform/*
+
+# State may contain secrets in plaintext; the real state lives in S3.
+*.tfstate
+*.tfstate.*
+.terraform.tfstate.lock.info
+
+# Variable files often hold credentials. Commit *.tfvars.example instead.
+*.tfvars
+*.tfvars.json
+!*.tfvars.example
+
+# Local overrides
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+crash.log
+crash.*.log
+
+# Kubeconfigs carry cluster credentials
+kubeconfig
+kubeconfig.*
+*.kubeconfig
+
+.DS_Store
+
+# Note: .terraform.lock.hcl is intentionally NOT ignored — it pins provider
+# versions and belongs in version control.

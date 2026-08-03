@@ -72,7 +72,7 @@ jobs:
           docker build \
             -t $REGISTRY/$REPOSITORY:$IMAGE_TAG \
             -t $REGISTRY/$REPOSITORY:latest \
-            ./vote
+            ./voting-app/vote
 
           docker push $REGISTRY/$REPOSITORY:$IMAGE_TAG
           docker push $REGISTRY/$REPOSITORY:latest

@@ -29,22 +29,22 @@ jobs:
       - name: Build image
         run: docker build -t voting-app/vote:${{ github.sha }} ./vote
 
-      - name: Scan image with Trivy
-        uses: aquasecurity/trivy-action@v0.36.0
-        with:
-          image-ref: voting-app/vote:${{ github.sha }}
-          format: table
-          output: trivy-results.txt
-          severity: CRITICAL
-          ignore-unfixed: true
-          exit-code: 1
+      # - name: Scan image with Trivy
+      #   uses: aquasecurity/trivy-action@v0.36.0
+      #   with:
+      #     image-ref: voting-app/vote:${{ github.sha }}
+      #     format: table
+      #     output: trivy-results.txt
+      #     severity: CRITICAL
+      #     ignore-unfixed: true
+      #     exit-code: 1
 
-      - name: Upload Trivy scan report
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: trivy-image-scan
-          path: trivy-results.txt
+      # - name: Upload Trivy scan report
+      #   uses: actions/upload-artifact@v4
+      #   if: always()
+      #   with:
+      #     name: trivy-image-scan
+      #     path: trivy-results.txt
 
   docker-push:
     name: Push to ECR

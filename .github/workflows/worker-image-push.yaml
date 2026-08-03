@@ -6,11 +6,11 @@ on:
     branches:
       - main
     paths:
-      - 'worker/**'
+      - 'voting-app/worker/**'
   push:
     branches: [main]
     paths:
-      - 'worker/**'
+      - 'voting-app/worker/**'
 
 
 permissions:
@@ -27,7 +27,7 @@ jobs:
         uses: actions/checkout@v3
 
       - name: Build image
-        run: docker build -t voting-app/worker:${{ github.sha }} ./worker
+        run: docker build -t voting-app/worker:${{ github.sha }} ./voting-app/worker
 
       - name: Scan image with Trivy
         uses: aquasecurity/trivy-action@v0.36.0
@@ -72,7 +72,7 @@ jobs:
           docker build \
             -t $REGISTRY/$REPOSITORY:$IMAGE_TAG \
             -t $REGISTRY/$REPOSITORY:latest \
-            ./worker
+            ./voting-app/worker
 
           docker push $REGISTRY/$REPOSITORY:$IMAGE_TAG
           docker push $REGISTRY/$REPOSITORY:latest

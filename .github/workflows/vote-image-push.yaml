@@ -6,11 +6,11 @@ on:
     branches:
       - main
     paths:
-      - 'vote/**'
+      - '/voting-app/vote/**'
   push:
     branches: [main]
     paths:
-      - 'vote/**'
+      - 'voting-app/vote/**'
 
 
 permissions:
@@ -27,7 +27,7 @@ jobs:
         uses: actions/checkout@v3
 
       - name: Build image
-        run: docker build -t voting-app/vote:${{ github.sha }} ./vote
+        run: docker build -t voting-app/vote:${{ github.sha }} ./voting-app/vote
 
       # - name: Scan image with Trivy
       #   uses: aquasecurity/trivy-action@v0.36.0

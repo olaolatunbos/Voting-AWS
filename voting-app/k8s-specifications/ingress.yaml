@@ -1,0 +1,58 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: vote
+  labels:
+    app: vote
+  annotations:
+    # cert-manager watches for this, issues a cert for the hosts in spec.tls,
+    # and writes it to the named secret. The issuer must exist first.
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  ingressClassName: nginx
+  tls:
+  - hosts:
+    - vote.olaolat.com
+    secretName: vote-tls
+  rules:
+  - host: vote.olaolat.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: vote
+            port:
+              number: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: result
+  labels:
+    app: result
+  annotations:
+    # result pushes scores over a socket.io WebSocket that is idle between
+    # 1s updates; the 60s default would drop it. Upgrade headers are handled
+    # by ingress-nginx automatically.
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  ingressClassName: nginx
+  tls:
+  - hosts:
+    - result.olaolat.com
+    secretName: result-tls
+  rules:
+  - host: result.olaolat.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: result
+            port:
+              number: 8081

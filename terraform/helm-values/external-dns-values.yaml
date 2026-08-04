@@ -1,0 +1,25 @@
+provider:
+  name: aws
+
+# No eks.amazonaws.com/role-arn annotation here on purpose. That annotation is
+# the IRSA path; credentials instead come from the EKS Pod Identity association
+# in modules/eks/main.tf, which the agent injects into the pod. The association
+# targets ServiceAccount "external-dns" — the name the chart derives from the
+# release when serviceAccount.name is left unset.
+
+# Route53 is a global service, but the SDK still needs a region to sign with.
+env:
+  - name: AWS_DEFAULT_REGION
+    value: eu-west-2
+
+# Without this external-dns manages every zone the IAM policy can reach.
+domainFilters:
+  - olaolat.com
+
+# Owner ID for the TXT registry records. This is what stops a second cluster
+# from taking over records it did not create.
+txtOwnerId: example
+
+# The chart default, stated explicitly because the alternative matters:
+# "sync" lets external-dns delete records, "upsert-only" never does.
+policy: upsert-only

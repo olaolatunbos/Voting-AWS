@@ -35,6 +35,15 @@ variable "endpoint_private_access" {
   default     = true
 }
 
+variable "route53_hosted_zone_id" {
+  description = <<-EOT
+    Zone cert-manager may write ACME DNS-01 challenge records into. Scoped to a
+    single zone rather than hostedzone/* because this grants record-write access
+    to a live public domain.
+  EOT
+  type        = string
+}
+
 variable "cluster_admin_principal_arns" {
   description = <<-EOT
     IAM users/roles granted cluster-admin via EKS access entries. Under

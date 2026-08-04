@@ -27,3 +27,17 @@ output "node_role_arn" {
   description = "IAM role assumed by Auto Mode nodes."
   value       = aws_iam_role.node.arn
 }
+
+output "oidc_provider_arn" {
+  description = "IAM OIDC provider for the cluster. Goes in the Federated principal of an IRSA trust policy."
+  value       = aws_iam_openid_connect_provider.cluster.arn
+}
+
+output "oidc_provider_url" {
+  description = <<-EOT
+    Issuer with the https:// scheme stripped. IRSA trust-policy conditions key
+    off this form: the condition variable is "<this>:sub" and the value is
+    "system:serviceaccount:<namespace>:<serviceaccount>".
+  EOT
+  value       = replace(aws_iam_openid_connect_provider.cluster.url, "https://", "")
+}

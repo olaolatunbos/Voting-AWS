@@ -17,6 +17,9 @@ module "eks" {
   # Private subnets only — see the variable's description for why.
   subnet_ids = module.vpc.private_subnet_ids
 
+  # olaolat.com — the zone the ingress hostnames live in.
+  route53_hosted_zone_id = "Z07845832PA7LU4WK4CO"
+
   # kubectl access is granted here, not by IAM. Root is deliberately absent:
   # EKS will not accept the account root user as an access-entry principal.
   cluster_admin_principal_arns = ["arn:aws:iam::801497981564:user/eks-admin"]

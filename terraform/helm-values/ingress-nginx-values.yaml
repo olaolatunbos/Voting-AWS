@@ -1,0 +1,13 @@
+# ingress-nginx-values.yaml
+controller:
+  service:
+    type: LoadBalancer
+    annotations:
+      service.beta.kubernetes.io/aws-load-balancer-type: "external"
+      service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: "ip"
+      service.beta.kubernetes.io/aws-load-balancer-scheme: "internet-facing"
+      # cross-zone LB (small cost, better distribution):
+      service.beta.kubernetes.io/aws-load-balancer-attributes: load_balancing.cross_zone.enabled=true
+  # keeps client source IP visible to your apps with ip targets:
+  config:
+    use-forwarded-headers: "true"

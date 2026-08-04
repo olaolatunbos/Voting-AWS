@@ -1,0 +1,20 @@
+# Also sets the server's own configured URL, not just the ingress host, so
+# redirect and callback links point at the right place.
+global:
+  domain: argocd.olaolat.com
+
+server:
+  # TLS terminates at ingress-nginx; without this argocd-server also serves
+  # TLS and the two ends up in a redirect loop.
+  extraArgs:
+  - --insecure
+  service:
+    type: ClusterIP
+  ingress:
+    enabled: true
+    ingressClassName: nginx
+    annotations:
+      cert-manager.io/cluster-issuer: letsencrypt-prod
+    # A boolean since chart 7.0, not a list. The secret name is derived from
+    # the release: argocd-server-tls.
+    tls: true

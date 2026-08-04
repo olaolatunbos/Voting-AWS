@@ -22,3 +22,20 @@ provider "helm" {
     }
   }
 }
+
+# Same credentials as the helm provider above, for the objects that are plain
+# manifests rather than releases (the default StorageClass, the monitoring
+# namespace). Kept in step with it — if one's auth changes, so must the other's.
+provider "kubernetes" {
+  host                   = module.eks.cluster_endpoint
+  cluster_ca_certificate = base64decode(module.eks.cluster_certificate_authority_data)
+
+  exec {
+    api_version = "client.authentication.k8s.io/v1beta1"
+    command     = "aws"
+    args        = ["eks", "get-token", "--cluster-name", module.eks.cluster_name, "--region", "eu-west-2"]
+    env = {
+      AWS_PROFILE = "eks-admin"
+    }
+  }
+}

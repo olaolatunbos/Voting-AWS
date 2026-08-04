@@ -14,9 +14,17 @@ on:
 
 
 permissions:
-  contents: read
+  # write, not read: the manifest bump at the end of docker-push commits back to
+  # this repo using the workflow token.
+  contents: write
   pull-requests: read
-  id-token: write  
+  id-token: write
+
+# The next version is derived by reading the current one, so two runs in flight
+# at once would both read the same number and race to publish it.
+concurrency:
+  group: result-image-push
+  cancel-in-progress: false
 
 jobs:
   docker-build:
@@ -50,6 +58,15 @@ jobs:
     name: Push to ECR
     runs-on: ubuntu-latest
     needs: [docker-build]
+
+    # Publishing is reserved for main. A merged PR arrives here as a push to
+    # main, so this covers merges while leaving the PR runs to build and scan
+    # only — otherwise every commit on an unmerged branch would consume a
+    # version number and move :latest to code that was never approved.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    env:
+      REPOSITORY: voting-app/result
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -58,25 +75,60 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/github-actions
-          aws-region: eu-west-2    
+          aws-region: eu-west-2
 
       - name: Log in to Amazon ECR
         id: ecr-login
         uses: aws-actions/amazon-ecr-login@v2
 
+      # ECR holds the counter rather than a file in the repo: nothing to commit
+      # back (and so no push that retriggers this workflow), and since each
+      # service has its own repository the three pipelines version independently.
+      - name: Resolve next version
+        id: version
+        run: |
+          set -euo pipefail
+
+          # grep is allowed to find nothing — that is just an empty repository,
+          # which starts the sequence at v1.0.0. Without the guard, pipefail
+          # turns its exit 1 into a failed run.
+          CURRENT=$(aws ecr list-images \
+            --repository-name "$REPOSITORY" \
+            --filter tagStatus=TAGGED \
+            --query 'imageIds[].imageTag' \
+            --output text \
+            | tr '[:space:]' '\n' \
+            | { grep -E '^v[0-9]+\.0\.0$' || true; } \
+            | sed 's/^v//; s/\.0\.0$//' \
+            | sort -n \
+            | tail -1)
+
+          echo "tag=v$(( ${CURRENT:-0} + 1 )).0.0" >> "$GITHUB_OUTPUT"
+
       - name: Build and push
         env:
           REGISTRY: ${{ steps.ecr-login.outputs.registry }}
-          REPOSITORY: voting-app/result
-          IMAGE_TAG: ${{ github.sha }}
+          IMAGE_TAG: ${{ steps.version.outputs.tag }}
         run: |
           docker build \
             -t $REGISTRY/$REPOSITORY:$IMAGE_TAG \
+            -t $REGISTRY/$REPOSITORY:${{ github.sha }} \
             -t $REGISTRY/$REPOSITORY:latest \
             ./voting-app/result
 
           docker push $REGISTRY/$REPOSITORY:$IMAGE_TAG
+          docker push $REGISTRY/$REPOSITORY:${{ github.sha }}
           docker push $REGISTRY/$REPOSITORY:latest
+
+          echo "Pushed $REPOSITORY:$IMAGE_TAG" >> "$GITHUB_STEP_SUMMARY"
+
+      # Runs only if the push above succeeded, so the manifest can never point
+      # at a tag that is not in ECR. Argo CD watches the manifest path, so this
+      # commit is what actually triggers the rollout.
+      - name: Update manifest image tag
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash scripts/update-manifest.sh result "$REPOSITORY" "${{ steps.version.outputs.tag }}"
 
 
 

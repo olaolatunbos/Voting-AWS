@@ -26,7 +26,7 @@ public class Worker {
             Jedis redis = openRedisConnection("redis");
 
             // Mirrors the .NET keep-alive query: something to run on an idle loop so the
-            // connection does not get dropped by an idle timeout.
+            // connection does not get dropped by an idle timeout
             Statement keepAlive = pgsql.createStatement();
 
             while (true) {

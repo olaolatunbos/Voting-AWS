@@ -47,13 +47,6 @@ jobs:
       #     ignore-unfixed: true
       #     exit-code: 1
 
-      # - name: Upload Trivy scan report
-      #   uses: actions/upload-artifact@v4
-      #   if: always()
-      #   with:
-      #     name: trivy-image-scan
-      #     path: trivy-results.txt
-
   docker-push:
     name: Push to ECR
     runs-on: ubuntu-latest

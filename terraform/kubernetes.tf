@@ -28,17 +28,6 @@ resource "kubernetes_storage_class_v1" "gp3" {
   depends_on = [module.eks]
 }
 
-# Created here rather than by create_namespace on each release: Prometheus and
-# Grafana are separate releases in one namespace, and with no ordering between
-# them both would race to create it.
-resource "kubernetes_namespace" "monitoring" {
-  metadata {
-    name = "monitoring"
-  }
-
-  depends_on = [module.eks]
-}
-
 resource "random_password" "grafana_admin" {
   length = 24
   # Grafana's login form is fine with symbols, but the value also travels

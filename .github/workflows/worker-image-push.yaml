@@ -14,19 +14,112 @@ on:
 
 
 permissions:
-  # write, not read: the manifest bump at the end of docker-push commits back to
-  # this repo using the workflow token.
   contents: write
   pull-requests: read
   id-token: write
 
-# The next version is derived by reading the current one, so two runs in flight
-# at once would both read the same number and race to publish it.
+
 concurrency:
   group: worker-image-push
   cancel-in-progress: false
 
 jobs:
+  static-analysis:
+    name: Static Analysis
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: voting-app/worker
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: maven
+
+      - name: Formatting
+        # google-java-format, AOSP style; `mvn spotless:apply` fixes locally.
+        run: mvn -B spotless:check
+
+      - name: Linting
+        # SpotBugs analyses bytecode, so the classes have to exist first.
+        run: mvn -B compile spotbugs:check
+
+      - name: Upload SpotBugs report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: spotbugs-report
+          path: voting-app/worker/target/spotbugsXml.xml
+
+  test:
+    name: Test and Coverage
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: voting-app/worker
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: maven
+
+      - name: Run tests with coverage
+        run: mvn -B test
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-report
+          path: |
+            voting-app/worker/target/site/jacoco/
+            voting-app/worker/target/surefire-reports/
+
+  security:
+    name: Security Analysis
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          # Full history so gitleaks can scan all commits, not just HEAD.
+          fetch-depth: 0
+
+      - name: Dependency audit (Trivy)
+        # Resolves the Maven tree from pom.xml. Reports only — the image scan in
+        # docker-build is the gate; this one surfaces fixable library CVEs.
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: voting-app/worker
+          scanners: vuln
+          format: table
+          output: dependency-audit-report.txt
+          severity: CRITICAL,HIGH
+          exit-code: 0
+
+      - name: Upload dependency audit report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dependency-audit-report
+          path: dependency-audit-report.txt
+
+      - name: Secret scanning (gitleaks)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   docker-build:
     name: Docker Build and Scan
     runs-on: ubuntu-latest
@@ -37,26 +130,28 @@ jobs:
       - name: Build image
         run: docker build -t voting-app/worker:${{ github.sha }} ./voting-app/worker
 
-      # - name: Scan image with Trivy
-      #   uses: aquasecurity/trivy-action@v0.36.0
-      #   with:
-      #     image-ref: voting-app/worker:${{ github.sha }}
-      #     format: table
-      #     output: trivy-results.txt
-      #     severity: CRITICAL
-      #     ignore-unfixed: true
-      #     exit-code: 1
+      - name: Scan image with Trivy
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: voting-app/worker:${{ github.sha }}
+          format: table
+          output: trivy-results.txt
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: 1
+
+      - name: Upload Trivy scan report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: trivy-image-scan
+          path: trivy-results.txt
 
 
   docker-push:
     name: Push to ECR
     runs-on: ubuntu-latest
     needs: [docker-build]
-
-    # Publishing is reserved for main. A merged PR arrives here as a push to
-    # main, so this covers merges while leaving the PR runs to build and scan
-    # only — otherwise every commit on an unmerged branch would consume a
-    # version number and move :latest to code that was never approved.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
     env:
@@ -75,9 +170,6 @@ jobs:
         id: ecr-login
         uses: aws-actions/amazon-ecr-login@v2
 
-      # ECR holds the counter rather than a file in the repo: nothing to commit
-      # back (and so no push that retriggers this workflow), and since each
-      # service has its own repository the three pipelines version independently.
       - name: Resolve next version
         id: version
         run: |
@@ -116,9 +208,6 @@ jobs:
 
           echo "Pushed $REPOSITORY:$IMAGE_TAG" >> "$GITHUB_STEP_SUMMARY"
 
-      # Runs only if the push above succeeded, so the manifest can never point
-      # at a tag that is not in ECR. Argo CD watches the manifest path, so this
-      # commit is what actually triggers the rollout.
       - name: Update manifest image tag
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

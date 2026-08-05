@@ -1,16 +1,16 @@
 package worker;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import redis.clients.jedis.Jedis;
-import redis.clients.jedis.exceptions.JedisConnectionException;
-
 import java.net.InetAddress;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.Statement;
+import redis.clients.jedis.Jedis;
+import redis.clients.jedis.exceptions.JedisConnectionException;
 
 public class Worker {
 
@@ -19,6 +19,9 @@ public class Worker {
     private static final String DB_PASSWORD = "postgres";
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
+
+    /** One entry off the `votes` list: who voted, and what for. */
+    record Vote(String voterId, String value) {}
 
     public static void main(String[] args) {
         try {
@@ -49,10 +52,9 @@ public class Worker {
                 }
 
                 if (json != null) {
-                    JsonNode vote = MAPPER.readTree(json);
-                    String voterId = vote.path("voter_id").asText();
-                    String voteValue = vote.path("vote").asText();
-                    System.out.printf("Processing vote for '%s' by '%s'%n", voteValue, voterId);
+                    Vote vote = parseVote(json);
+                    System.out.printf(
+                            "Processing vote for '%s' by '%s'%n", vote.value(), vote.voterId());
 
                     // Reconnect DB if down
                     if (!isDbConnected(pgsql)) {
@@ -60,7 +62,7 @@ public class Worker {
                         pgsql = openDbConnection();
                         keepAlive = pgsql.createStatement();
                     } else { // Normal +1 vote requested
-                        updateVote(pgsql, voterId, voteValue);
+                        updateVote(pgsql, vote.voterId(), vote.value());
                     }
                 } else {
                     keepAlive.execute("SELECT 1");
@@ -88,7 +90,8 @@ public class Worker {
         System.err.println("Connected to db");
 
         try (Statement statement = connection.createStatement()) {
-            statement.execute("""
+            statement.execute(
+                    """
                     CREATE TABLE IF NOT EXISTS votes (
                         id VARCHAR(255) NOT NULL UNIQUE,
                         vote VARCHAR(255) NOT NULL
@@ -115,7 +118,15 @@ public class Worker {
         }
     }
 
-    private static boolean isRedisConnected(Jedis redis) {
+    // Package-private rather than private: the tests below the src tree exercise
+    // these directly, and they are the only logic that does not need a live
+    // Redis/Postgres to run.
+    static Vote parseVote(String json) throws JsonProcessingException {
+        JsonNode node = MAPPER.readTree(json);
+        return new Vote(node.path("voter_id").asText(), node.path("vote").asText());
+    }
+
+    static boolean isRedisConnected(Jedis redis) {
         try {
             return redis != null && redis.isConnected() && "PONG".equalsIgnoreCase(redis.ping());
         } catch (JedisConnectionException e) {
@@ -123,7 +134,7 @@ public class Worker {
         }
     }
 
-    private static boolean isDbConnected(Connection connection) {
+    static boolean isDbConnected(Connection connection) {
         try {
             return connection != null && !connection.isClosed() && connection.isValid(1);
         } catch (SQLException e) {
@@ -131,16 +142,16 @@ public class Worker {
         }
     }
 
-    private static void updateVote(Connection connection, String voterId, String vote) throws SQLException {
+    static void updateVote(Connection connection, String voterId, String vote) throws SQLException {
         try (PreparedStatement insert =
-                     connection.prepareStatement("INSERT INTO votes (id, vote) VALUES (?, ?)")) {
+                connection.prepareStatement("INSERT INTO votes (id, vote) VALUES (?, ?)")) {
             insert.setString(1, voterId);
             insert.setString(2, vote);
             insert.executeUpdate();
         } catch (SQLException e) {
             // Voter already exists (unique violation on id): switch their vote instead.
             try (PreparedStatement update =
-                         connection.prepareStatement("UPDATE votes SET vote = ? WHERE id = ?")) {
+                    connection.prepareStatement("UPDATE votes SET vote = ? WHERE id = ?")) {
                 update.setString(1, vote);
                 update.setString(2, voterId);
                 update.executeUpdate();

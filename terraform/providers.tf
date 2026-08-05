@@ -3,10 +3,7 @@ provider "aws" {
   profile = "eks-admin"
 }
 
-# Auth mirrors `aws eks update-kubeconfig`: a short-lived token minted per
-# apply, so nothing long-lived lands in state. AWS_PROFILE is pinned to
-# eks-admin because the account root user cannot be an EKS access-entry
-# principal and will be rejected by the API server.
+
 provider "helm" {
   kubernetes {
     host                   = module.eks.cluster_endpoint
@@ -23,9 +20,6 @@ provider "helm" {
   }
 }
 
-# Same credentials as the helm provider above, for the objects that are plain
-# manifests rather than releases (the default StorageClass, the monitoring
-# namespace). Kept in step with it — if one's auth changes, so must the other's.
 provider "kubernetes" {
   host                   = module.eks.cluster_endpoint
   cluster_ca_certificate = base64decode(module.eks.cluster_certificate_authority_data)

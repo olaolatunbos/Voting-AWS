@@ -26,23 +26,18 @@
         </div>
       </div>
     </div>
-    <script src="http://code.jquery.com/jquery-latest.min.js" type="text/javascript"></script>
-    <script src="//cdnjs.cloudflare.com/ajax/libs/jquery-cookie/1.4.1/jquery.cookie.js"></script>
-
     {% if vote %}
     <script>
+      // No jQuery: it was pulled from an http:// CDN, which browsers block as
+      // mixed content once the page is served over TLS by the ingress, taking
+      // this whole block down with it.
       var vote = "{{vote}}";
+      var chosen = document.querySelector(vote == "a" ? ".a" : ".b");
+      var other = document.querySelector(vote == "a" ? ".b" : ".a");
 
-      if(vote == "a"){
-        $(".a").prop('disabled', true);
-        $(".a").html('{{option_a}} <i class="fa fa-check-circle"></i>');
-        $(".b").css('opacity','0.5');
-      }
-      if(vote == "b"){
-        $(".b").prop('disabled', true);
-        $(".b").html('{{option_b}} <i class="fa fa-check-circle"></i>');
-        $(".a").css('opacity','0.5');
-      }
+      chosen.disabled = true;
+      chosen.innerHTML = chosen.textContent.trim() + ' <i class="fa fa-check-circle"></i>';
+      other.style.opacity = "0.5";
     </script>
     {% endif %}
   </body>

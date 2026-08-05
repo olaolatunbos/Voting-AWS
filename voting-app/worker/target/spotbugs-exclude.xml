@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FindBugsFilter>
+  <!-- DMI_CONSTANT_DB_PASSWORD: the sample app hard-codes postgres:postgres in
+       every service (vote, worker, result) and the compose/k8s Postgres is
+       provisioned with the same pair. Fixing it here alone would break the app,
+       so it is excluded rather than left to fail every run. -->
+  <Match>
+    <Class name="worker.Worker"/>
+    <Method name="openDbConnection"/>
+    <Bug pattern="DMI_CONSTANT_DB_PASSWORD"/>
+  </Match>
+</FindBugsFilter>

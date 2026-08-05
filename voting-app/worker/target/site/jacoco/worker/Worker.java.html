@@ -1,0 +1,162 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>Worker.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">worker</a> &gt; <a href="index.source.html" class="el_package">worker</a> &gt; <span class="el_source">Worker.java</span></div><h1>Worker.java</h1><pre class="source lang-java linenums"><span class="fc" id="L1">package worker;</span>
+
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.net.InetAddress;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.PreparedStatement;
+import java.sql.SQLException;
+import java.sql.Statement;
+import redis.clients.jedis.Jedis;
+import redis.clients.jedis.exceptions.JedisConnectionException;
+
+<span class="nc" id="L15">public class Worker {</span>
+
+    private static final String DB_URL = &quot;jdbc:postgresql://db/postgres&quot;;
+    private static final String DB_USER = &quot;postgres&quot;;
+    private static final String DB_PASSWORD = &quot;postgres&quot;;
+
+<span class="fc" id="L21">    private static final ObjectMapper MAPPER = new ObjectMapper();</span>
+
+    /** One entry off the `votes` list: who voted, and what for. */
+    record Vote(String voterId, String value) {}
+
+    public static void main(String[] args) {
+        try {
+<span class="nc" id="L28">            Connection pgsql = openDbConnection();</span>
+<span class="nc" id="L29">            Jedis redis = openRedisConnection(&quot;redis&quot;);</span>
+
+            // Mirrors the .NET keep-alive query: something to run on an idle loop so the
+            // connection does not get dropped by an idle timeout
+<span class="nc" id="L33">            Statement keepAlive = pgsql.createStatement();</span>
+
+<span class="nc" id="L35">            while (true) {</span>
+                // Slow down to prevent CPU spike, only query each 100ms
+<span class="nc" id="L37">                Thread.sleep(100);</span>
+
+                // Reconnect redis if down
+<span class="nc bnc" id="L40" title="All 2 branches missed.">                if (!isRedisConnected(redis)) {</span>
+<span class="nc" id="L41">                    System.out.println(&quot;Reconnecting Redis&quot;);</span>
+<span class="nc" id="L42">                    redis = openRedisConnection(&quot;redis&quot;);</span>
+                }
+
+                String json;
+                try {
+<span class="nc" id="L47">                    json = redis.lpop(&quot;votes&quot;);</span>
+<span class="nc" id="L48">                } catch (JedisConnectionException e) {</span>
+<span class="nc" id="L49">                    System.out.println(&quot;Reconnecting Redis&quot;);</span>
+<span class="nc" id="L50">                    redis = openRedisConnection(&quot;redis&quot;);</span>
+<span class="nc" id="L51">                    continue;</span>
+                }
+
+<span class="nc bnc" id="L54" title="All 2 branches missed.">                if (json != null) {</span>
+<span class="nc" id="L55">                    Vote vote = parseVote(json);</span>
+<span class="nc" id="L56">                    System.out.printf(</span>
+<span class="nc" id="L57">                            &quot;Processing vote for '%s' by '%s'%n&quot;, vote.value(), vote.voterId());</span>
+
+                    // Reconnect DB if down
+<span class="nc bnc" id="L60" title="All 2 branches missed.">                    if (!isDbConnected(pgsql)) {</span>
+<span class="nc" id="L61">                        System.out.println(&quot;Reconnecting DB&quot;);</span>
+<span class="nc" id="L62">                        pgsql = openDbConnection();</span>
+<span class="nc" id="L63">                        keepAlive = pgsql.createStatement();</span>
+<span class="nc" id="L64">                    } else { // Normal +1 vote requested</span>
+<span class="nc" id="L65">                        updateVote(pgsql, vote.voterId(), vote.value());</span>
+                    }
+<span class="nc" id="L67">                } else {</span>
+<span class="nc" id="L68">                    keepAlive.execute(&quot;SELECT 1&quot;);</span>
+                }
+            }
+<span class="nc" id="L71">        } catch (Exception ex) {</span>
+<span class="nc" id="L72">            ex.printStackTrace(System.err);</span>
+<span class="nc" id="L73">            System.exit(1);</span>
+        }
+<span class="nc" id="L75">    }</span>
+
+    private static Connection openDbConnection() throws InterruptedException, SQLException {
+        Connection connection;
+
+<span class="nc" id="L80">        while (true) {</span>
+            try {
+<span class="nc" id="L82">                connection = DriverManager.getConnection(DB_URL, DB_USER, DB_PASSWORD);</span>
+<span class="nc" id="L83">                break;</span>
+<span class="nc" id="L84">            } catch (SQLException e) {</span>
+<span class="nc" id="L85">                System.err.println(&quot;Waiting for db&quot;);</span>
+<span class="nc" id="L86">                Thread.sleep(1000);</span>
+            }
+        }
+
+<span class="nc" id="L90">        System.err.println(&quot;Connected to db&quot;);</span>
+
+<span class="nc" id="L92">        try (Statement statement = connection.createStatement()) {</span>
+<span class="nc" id="L93">            statement.execute(</span>
+<span class="nc" id="L94">                    &quot;&quot;&quot;</span>
+                    CREATE TABLE IF NOT EXISTS votes (
+                        id VARCHAR(255) NOT NULL UNIQUE,
+                        vote VARCHAR(255) NOT NULL
+                    )&quot;&quot;&quot;);
+        }
+
+<span class="nc" id="L101">        return connection;</span>
+    }
+
+    private static Jedis openRedisConnection(String hostname) throws Exception {
+<span class="nc" id="L105">        String ipAddress = InetAddress.getByName(hostname).getHostAddress();</span>
+<span class="nc" id="L106">        System.out.printf(&quot;Found redis at %s%n&quot;, ipAddress);</span>
+
+<span class="nc" id="L108">        while (true) {</span>
+            try {
+<span class="nc" id="L110">                System.err.println(&quot;Connecting to redis&quot;);</span>
+<span class="nc" id="L111">                Jedis jedis = new Jedis(ipAddress, 6379);</span>
+<span class="nc" id="L112">                jedis.ping();</span>
+<span class="nc" id="L113">                return jedis;</span>
+<span class="nc" id="L114">            } catch (JedisConnectionException e) {</span>
+<span class="nc" id="L115">                System.err.println(&quot;Waiting for redis&quot;);</span>
+<span class="nc" id="L116">                Thread.sleep(1000);</span>
+            }
+        }
+    }
+
+    // Package-private rather than private: the tests below the src tree exercise
+    // these directly, and they are the only logic that does not need a live
+    // Redis/Postgres to run.
+    static Vote parseVote(String json) throws JsonProcessingException {
+<span class="fc" id="L125">        JsonNode node = MAPPER.readTree(json);</span>
+<span class="fc" id="L126">        return new Vote(node.path(&quot;voter_id&quot;).asText(), node.path(&quot;vote&quot;).asText());</span>
+    }
+
+    static boolean isRedisConnected(Jedis redis) {
+        try {
+<span class="pc bpc" id="L131" title="2 of 6 branches missed.">            return redis != null &amp;&amp; redis.isConnected() &amp;&amp; &quot;PONG&quot;.equalsIgnoreCase(redis.ping());</span>
+<span class="fc" id="L132">        } catch (JedisConnectionException e) {</span>
+<span class="fc" id="L133">            return false;</span>
+        }
+    }
+
+    static boolean isDbConnected(Connection connection) {
+        try {
+<span class="pc bpc" id="L139" title="1 of 6 branches missed.">            return connection != null &amp;&amp; !connection.isClosed() &amp;&amp; connection.isValid(1);</span>
+<span class="fc" id="L140">        } catch (SQLException e) {</span>
+<span class="fc" id="L141">            return false;</span>
+        }
+    }
+
+    static void updateVote(Connection connection, String voterId, String vote) throws SQLException {
+<span class="fc" id="L146">        try (PreparedStatement insert =</span>
+<span class="fc" id="L147">                connection.prepareStatement(&quot;INSERT INTO votes (id, vote) VALUES (?, ?)&quot;)) {</span>
+<span class="fc" id="L148">            insert.setString(1, voterId);</span>
+<span class="fc" id="L149">            insert.setString(2, vote);</span>
+<span class="fc" id="L150">            insert.executeUpdate();</span>
+<span class="fc" id="L151">        } catch (SQLException e) {</span>
+            // Voter already exists (unique violation on id): switch their vote instead.
+<span class="fc" id="L153">            try (PreparedStatement update =</span>
+<span class="fc" id="L154">                    connection.prepareStatement(&quot;UPDATE votes SET vote = ? WHERE id = ?&quot;)) {</span>
+<span class="fc" id="L155">                update.setString(1, vote);</span>
+<span class="fc" id="L156">                update.setString(2, voterId);</span>
+<span class="fc" id="L157">                update.executeUpdate();</span>
+            }
+        }
+<span class="fc" id="L160">    }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.12.202403310830</span></div></body></html>

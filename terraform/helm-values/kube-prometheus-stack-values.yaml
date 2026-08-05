@@ -1,0 +1,158 @@
+### Prometheus
+#
+# ClusterIP only, no Ingress. Prometheus ships no authentication of its own,
+# and its API can read every metric in the cluster. Reach it with:
+#   kubectl -n monitoring port-forward svc/prometheus-operated 9090
+# Grafana talks to it in-cluster, so nothing here needs to be public.
+prometheus:
+  service:
+    type: ClusterIP
+
+  prometheusSpec:
+    # Beyond this the volume below has to grow with it.
+    retention: 15d
+
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 20Gi
+          # storageClassName left unset on purpose: it falls through to the
+          # cluster default, which is the gp3 class in kubernetes.tf. Naming it
+          # here would duplicate that decision in two places.
+
+    resources:
+      requests:
+        cpu: 250m
+        memory: 1Gi
+      limits:
+        memory: 2Gi
+
+    # By default the operator only picks up ServiceMonitors/PodMonitors carrying
+    # this release's helm labels. Clearing the selectors makes it watch every
+    # one in the cluster, so the voting app can ship its own ServiceMonitor
+    # without knowing the monitoring release name.
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    probeSelectorNilUsesHelmValues: false
+    scrapeConfigSelectorNilUsesHelmValues: false
+
+alertmanager:
+  enabled: true
+  alertmanagerSpec:
+    storage:
+      volumeClaimTemplate:
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 2Gi
+
+### Control-plane scrape targets
+#
+# EKS runs the control plane on AWS's side of the boundary and exposes no
+# metrics endpoint for these components — the API server is the only one
+# reachable. Left enabled, each would sit permanently Down in Prometheus and
+# fire its ...Down alert forever, so both the exporter and the matching rule
+# group are switched off. Auto Mode goes further and does not run kube-proxy at
+# all; its networking is managed by AWS.
+kubeControllerManager:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeEtcd:
+  enabled: false
+kubeProxy:
+  enabled: false
+
+defaultRules:
+  create: true
+  rules:
+    kubeControllerManager: false
+    kubeSchedulerAlerting: false
+    kubeSchedulerRecording: false
+    kubeProxy: false
+    etcd: false
+    # Nothing here runs Windows nodes.
+    windows: false
+
+# Same reason: no Windows nodes, so skip the exporter entirely.
+windowsMonitoring:
+  enabled: false
+
+### Exporters
+#
+# Both on by default and both wanted — kube-state-metrics supplies the
+# Deployment/Pod/Node object metrics that most of the bundled dashboards are
+# built on, node-exporter the per-host CPU, memory, disk and network series.
+kubeStateMetrics:
+  enabled: true
+
+nodeExporter:
+  enabled: true
+
+### Grafana
+grafana:
+  enabled: true
+
+  # Sets Grafana's own idea of its address, not just the Ingress host, so that
+  # redirects and generated share links do not point at the in-cluster Service.
+  grafana.ini:
+    server:
+      root_url: https://grafana.olaolat.com
+
+  service:
+    type: ClusterIP
+
+  ingress:
+    enabled: true
+    ingressClassName: nginx
+    annotations:
+      cert-manager.io/cluster-issuer: letsencrypt-prod
+    hosts:
+      - grafana.olaolat.com
+    tls:
+      - secretName: grafana-tls
+        hosts:
+          - grafana.olaolat.com
+
+  # Without this the pod is backed by emptyDir and every restart wipes anything
+  # created through the UI. The dashboards this chart provisions survive either
+  # way; ad-hoc ones do not.
+  persistence:
+    enabled: true
+    type: pvc
+    size: 10Gi
+    # storageClassName unset — inherits the cluster default gp3 class.
+
+  # adminPassword is deliberately absent here: helm-charts.tf injects one via
+  # set_sensitive so it is not a plaintext string in the repo. Leaving it unset
+  # entirely is not the same thing — the chart then falls back to the literal
+  # "prom-operator", which is public knowledge.
+  adminUser: admin
+
+  # No datasources or dashboards block: unlike the standalone grafana chart,
+  # this one wires up the Prometheus and Alertmanager datasources itself and
+  # provisions the upstream kubernetes-mixin dashboards (cluster, namespace,
+  # node, workload, kubelet, and the rest) from the chart rather than pulling
+  # them from grafana.com at pod start.
+  defaultDashboardsEnabled: true
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 512Mi
+
+### Operator
+prometheusOperator:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      memory: 256Mi

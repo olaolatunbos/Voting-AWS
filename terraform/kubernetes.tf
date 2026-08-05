@@ -1,8 +1,3 @@
-# Auto Mode enables the block storage capability (storage_config in
-# modules/eks/main.tf) but does not create a StorageClass to go with it, and
-# unlike self-managed EKS there is no "gp2" class installed by an addon. Until
-# something claims the default annotation, every PVC in the cluster sits
-# Pending forever — which is how the Prometheus and Grafana volumes would fail.
 resource "kubernetes_storage_class_v1" "gp3" {
   metadata {
     name = "gp3"
